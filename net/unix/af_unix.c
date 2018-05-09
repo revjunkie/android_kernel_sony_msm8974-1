@@ -1700,7 +1700,6 @@ restart_locked:
 		if (err)
 			goto out_unlock;
 	}
-
 	/* other == sk && unix_peer(other) != sk if
 	 * - unix_peer(sk) == NULL, destination address bound to sk
 	 * - unix_peer(sk) == sk by time of get but disconnected before lock

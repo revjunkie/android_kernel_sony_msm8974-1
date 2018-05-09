@@ -91,6 +91,13 @@
 #define ENTRY_OVERHEAD strlen("bssid=\nssid=\nfreq=\nlevel=\nage=\ndist=\ndistSd=\n====")
 #define TIME_MIN_DIFF 5
 
+#define EVENT_DATABUF_MAXLEN	(512 - sizeof(bcm_event_t))
+#define EVENT_MAX_NETCNT \
+	((EVENT_DATABUF_MAXLEN - sizeof(wl_pfn_scanresults_t)) \
+	/ sizeof(wl_pfn_net_info_t) + 1)
+
+static wlc_ssid_ext_t * dhd_pno_get_legacy_pno_ssid(dhd_pub_t *dhd,
+	dhd_pno_status_info_t *pno_state);
 #ifdef GSCAN_SUPPORT
 static int _dhd_pno_flush_ssid(dhd_pub_t *dhd);
 static wl_pfn_gscan_ch_bucket_cfg_t *
@@ -3689,6 +3696,7 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, int *size)
 	uint8 channel;
 	uint32 mem_needed;
 	struct timespec ts;
+	wl_event_gas_t *gas_data;
 
 	*size = 0;
 
@@ -3709,9 +3717,22 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, int *size)
 		DHD_ERROR(("Invalid bss_info length %d: ignoring\n", bi_length));
 		goto exit;
 	}
-	if (bi->SSID_len > DOT11_MAX_SSID_LEN) {
-		DHD_ERROR(("Invalid SSID length %d: trimming it to max\n", bi->SSID_len));
-		bi->SSID_len = DOT11_MAX_SSID_LEN;
+	if ((bi->SSID_len > DOT11_MAX_SSID_LEN)||
+		(bi->ie_length > (*size - sizeof(wl_bss_info_t))) ||
+		(bi->ie_offset < sizeof(wl_bss_info_t)) ||
+		(bi->ie_offset > (sizeof(wl_bss_info_t) + bi->ie_length))){
+		DHD_ERROR(("%s: tot:%d,SSID:%d,ie_len:%d,ie_off:%d\n",
+			__FUNCTION__, *size, bi->SSID_len,
+			bi->ie_length, bi->ie_offset));
+		return NULL;
+	}
+
+	gas_data = (wl_event_gas_t *)((uint8 *)data + bi->ie_offset + bi->ie_length);
+
+	if (gas_data->data_len > (*size - (bi->ie_offset + bi->ie_length))) {
+		DHD_ERROR(("%s: wrong gas_data_len:%d\n",
+			__FUNCTION__, gas_data->data_len));
+		return NULL;
 	}
 
 	mem_needed = OFFSETOF(wifi_gscan_full_result_t, ie_data) + bi->ie_length;
@@ -3878,7 +3899,9 @@ void *dhd_handle_hotlist_scan_evt(dhd_pub_t *dhd, const void *event_data, int *s
 
 	gscan_params = &(_pno_state->pno_params_arr[INDEX_OF_GSCAN_PARAMS].params_gscan);
 
-	if (!results->count) {
+	if ((results->count == 0) || (results->count > EVENT_MAX_NETCNT)) {
+		DHD_ERROR(("%s: wrong count:%d\n", __FUNCTION__,
+				results->count));
 		*send_evt_bytes = 0;
 		return ptr;
 	}

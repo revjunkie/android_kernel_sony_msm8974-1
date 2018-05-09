@@ -1,6 +1,6 @@
 /* Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2017, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -111,7 +111,11 @@ static int audio_aio_ion_lookup_vaddr(struct q6audio_aio *audio, void *addr,
 	list_for_each_entry(region_elt, &audio->ion_region_queue, list) {
 		if (addr >= region_elt->vaddr &&
 			addr < region_elt->vaddr + region_elt->len &&
-			addr + len <= region_elt->vaddr + region_elt->len) {
+			addr + len <= region_elt->vaddr + region_elt->len &&
+			addr + len > addr) {
+
+			/* to avoid integer addition overflow */
+
 			/* offset since we could pass vaddr inside a registerd
 			* ion buffer
 			*/
@@ -688,6 +692,7 @@ static long audio_aio_process_event_req(struct q6audio_aio *audio,
 	struct audio_aio_event *drv_evt = NULL;
 	int timeout;
 	unsigned long flags;
+	memset(&usr_evt, 0, sizeof(struct msm_audio_event));
 
 	if (copy_from_user(&usr_evt, arg, sizeof(struct msm_audio_event)))
 		return -EFAULT;
@@ -706,8 +711,11 @@ static long audio_aio_process_event_req(struct q6audio_aio *audio,
 		rc = wait_event_interruptible(audio->event_wait,
 		audio_aio_events_pending(audio));
 	}
-	if (rc < 0)
+	if (rc < 0) {
+		pr_err("%s: audio process event failed, rc = %ld",
+			__func__, rc);
 		return rc;
+    }
 
 	if (audio->event_abort) {
 		audio->event_abort = 0;
